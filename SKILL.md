@@ -4,9 +4,9 @@ Communicate with Claude Code via email — send task results, receive and execut
 
 ## Setup
 
-1. Copy `email-config.example.json` to `email-config.json`
-2. Fill in your email credentials (see Configuration)
-3. Copy `email-bridge.py` and `SKILL.md` into your Claude Code project
+1. Copy `email-config.example.json` to `email-config.json` and fill in credentials
+2. Copy all files into your Claude Code project
+3. Start the background poller
 
 ## Configuration (`email-config.json`)
 
@@ -26,8 +26,6 @@ To get an SMTP/POP3 auth code for 163.com:
 - Settings → POP3/SMTP/IMAP → Enable SMTP and POP3
 - Copy the generated authorization code
 
-Other email providers (QQ, Gmail, etc.) — just update the server/port fields.
-
 ## Commands
 
 ```bash
@@ -38,31 +36,58 @@ python3 email-bridge.py send "<subject>" "<body>"
 python3 email-bridge.py check [limit]
 ```
 
+## Architecture (Zero-Waste Auto-Polling)
+
+To avoid wasting LLM tokens on empty mailbox checks, use a two-tier architecture:
+
+```
+Background Bash Loop (zero LLM cost)
+  │  every 3 min: POP3 check → new emails? → write to /tmp/email-pending-queue.txt
+  │
+Cron (every 10-15 min)
+  │  queue empty? → reply "." (1 token)
+  │  queue has mail? → read, execute, reply via email, clear queue
+```
+
+### 1. Start the background poller
+
+```bash
+chmod +x email-poll-loop.sh
+nohup ./email-poll-loop.sh &>/dev/null &
+```
+
+This loops silently — POP3 check every 3 minutes, writes new user emails to `/tmp/email-pending-queue.txt`. No LLM interaction at all.
+
+### 2. Set up the cron in Claude Code
+
+```
+/loop 13m check /tmp/email-pending-queue.txt:
+  if empty, reply ".". If has mail, read instructions,
+  execute, reply via python3 email-bridge.py send,
+  then clear the queue.
+```
+
+Or use CronCreate with:
+```
+*/13 * * * *
+prompt: check /tmp/email-pending-queue.txt — if empty reply ".",
+if has content, process instructions, email results via
+email-bridge.py send, then truncate the queue.
+```
+
 ## When Claude Code Uses Email
 
-**Send notifications** — long-running tasks (>2 min), or when the user says "notify me when done".
+**Send notifications** — long-running tasks (>2 min), or when user says "notify me when done".
 
-**Check inbox** — user says "check my email", or via a recurring cron/loop. Claude reads the email body as a command, executes it, and replies by email with the result.
+**Check inbox** — automatic via the background poller + cron setup above.
 
 ## Email Command Protocol
 
-1. Check inbox for new emails → `python3 email-bridge.py check`
-2. For each new email from the receiver address:
-   - Read body as command/instruction
-   - Execute the command
-   - Send result back via `python3 email-bridge.py send "Re: ..." "..."`
-3. Emails are auto-tracked as seen via `.email-seen.json` (UID tracking)
-
-## Auto-Polling (in Claude Code)
-
-To have Claude Code automatically check for email commands, set up a recurring loop:
-
-```
-/loop 3m check email: run `python3 email-bridge.py check 3`, if new emails from
-receiver, execute instructions and reply via send. Ignore system/notification emails.
-```
-
-This makes Claude Code fully controllable via email without manual prompting.
+1. Background poller detects new email → writes to queue
+2. Cron fires → Claude reads queue file
+3. Execute the email body as a command
+4. Reply via email with results
+5. Clear the queue file
 
 ## Supported Providers
 
@@ -72,11 +97,24 @@ This makes Claude Code fully controllable via email without manual prompting.
 | QQ Mail  | smtp.qq.com:465 | pop.qq.com:995 |
 | Gmail    | smtp.gmail.com:465 | pop.gmail.com:995 |
 
+## File Structure
+
+```
+email-bridge/
+├── email-bridge.py              # Send/check emails
+├── email-poll-loop.sh           # Background silent poller
+├── SKILL.md                     # This file
+├── email-config.example.json    # Config template
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
 ## Security
 
-- Never commit `email-config.json` — it's in `.gitignore`
-- Store auth codes only in the local config file
-- The `.email-seen.json` file tracks processed email UIDs locally
+- `email-config.json` is gitignored — never commit auth codes
+- `.email-seen.json` tracks processed email UIDs locally
+- Auth codes stay in local config only
 
 ## License
 
