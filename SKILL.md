@@ -6,7 +6,8 @@ Communicate with Claude Code via email — send task results, receive and execut
 
 1. Copy `email-config.example.json` to `email-config.json` and fill in credentials
 2. Copy all files into your Claude Code project
-3. Start the background poller: `nohup ./email-poll-loop.sh &>/dev/null &`
+3. Set optional env vars (see Environment Variables)
+4. Start the background poller: `nohup ./email-poll-loop.sh &>/dev/null &`
 
 ## Configuration (`email-config.json`)
 
@@ -79,6 +80,13 @@ email-bridge/
 ├── LICENSE
 └── README.md
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMAIL_PROJECT_DIR` | script directory | Project root where `claude` CLI runs |
+| `EMAIL_QUEUE_FILE` | `/tmp/email-pending-queue.txt` | Email queue file path |
 
 ## Supported Providers
 

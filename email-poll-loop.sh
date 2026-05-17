@@ -5,29 +5,31 @@
 #   "new"      → claude -p (fresh session, standalone task)
 # Auto-expires after 24 hours.
 
-QUEUE_FILE="/tmp/email-pending-queue.txt"
+QUEUE_FILE="${EMAIL_QUEUE_FILE:-/tmp/email-pending-queue.txt}"
 LOCK_FILE="/tmp/email-poll.lock"
 CLAUDE_LOCK="/tmp/email-claude.lock"
 SESSION_FILE="/tmp/email-claude-session.txt"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BRIDGE="$SCRIPT_DIR/email-bridge.py"
 DECIDE="$SCRIPT_DIR/email-decision.py"
-PROJECT_DIR="/root/autodl-tmp"
+PROJECT_DIR="${EMAIL_PROJECT_DIR:-$SCRIPT_DIR}"
 SYS_SENDERS="service.netease.com|club@service.netease.com|safe@service.netease.com"
-RECEIVER="1137686346@qq.com"
 
-PROMPT_CONTINUE='You are continuing a previous conversation via email.
+# Read receiver from config
+RECEIVER=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/email-config.json'))['receiver'])" 2>/dev/null || echo "")
+
+PROMPT_CONTINUE="You are continuing a previous conversation via email.
 Process the email content below and reply:
 1. Read the email body as a command/instruction
 2. Execute it, maintaining context from prior conversation
-3. Reply via: python3 /root/autodl-tmp/scripts/email-bridge.py send "Re: <subject>" "<result>"
-Do not ask for confirmation. Work efficiently.'
+3. Reply via: python3 $BRIDGE send \"Re: <subject>\" \"<result>\"
+Do not ask for confirmation. Work efficiently."
 
-PROMPT_NEW='Process this email as a new standalone task:
+PROMPT_NEW="Process this email as a new standalone task:
 1. Read the email body as a command/instruction
 2. Execute it fully
-3. Reply via: python3 /root/autodl-tmp/scripts/email-bridge.py send "Re: <subject>" "<result>"
-Do not ask for confirmation. Work efficiently.'
+3. Reply via: python3 $BRIDGE send \"Re: <subject>\" \"<result>\"
+Do not ask for confirmation. Work efficiently."
 
 exec 200>"$LOCK_FILE"
 flock -n 200 || exit 0
