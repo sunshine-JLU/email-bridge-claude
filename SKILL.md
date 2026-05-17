@@ -6,7 +6,7 @@ Communicate with Claude Code via email — send task results, receive and execut
 
 1. Copy `email-config.example.json` to `email-config.json` and fill in credentials
 2. Copy all files into your Claude Code project
-3. Start the background poller
+3. Start the background poller: `nohup ./email-poll-loop.sh &>/dev/null &`
 
 ## Configuration (`email-config.json`)
 
@@ -32,62 +32,53 @@ To get an SMTP/POP3 auth code for 163.com:
 # Send an email
 python3 email-bridge.py send "<subject>" "<body>"
 
-# Check for new emails
+# Check for new emails (manual)
 python3 email-bridge.py check [limit]
 ```
 
-## Architecture (Zero-Waste Auto-Polling)
+## Smart Session Routing
 
-To avoid wasting LLM tokens on empty mailbox checks, use a two-tier architecture:
+The background poller intelligently decides whether to continue an existing
+conversation or start a new one, based on email content:
 
-```
-Background Bash Loop (zero LLM cost)
-  │  every 3 min: POP3 check → new emails? → write to /tmp/email-pending-queue.txt
-  │
-Cron (every 10-15 min)
-  │  queue empty? → reply "." (1 token)
-  │  queue has mail? → read, execute, reply via email, clear queue
-```
+| Trigger | Mode | Behavior |
+|---------|------|----------|
+| Subject starts with `Re:` | `--resume` | Continue existing session |
+| Body contains `继续`/`接着`/`上次`/`刚才`/`之前` | `--resume` | Continue existing session |
+| Body contains `!new`/`新对话`/`新任务` | `-p` | Force new session |
+| Default (no keywords) | `-p` | New standalone session |
 
-### 1. Start the background poller
+Session ID is persisted across emails. Continued emails share Claude context.
 
-```bash
-chmod +x email-poll-loop.sh
-nohup ./email-poll-loop.sh &>/dev/null &
-```
-
-This loops silently — POP3 check every 3 minutes, writes new user emails to `/tmp/email-pending-queue.txt`. No LLM interaction at all.
-
-### 2. Set up the cron in Claude Code
+## Architecture
 
 ```
-/loop 13m check /tmp/email-pending-queue.txt:
-  if empty, reply ".". If has mail, read instructions,
-  execute, reply via python3 email-bridge.py send,
-  then clear the queue.
+You ──email──> POP3 inbox
+                  │
+Bash poller (3min) │  free, zero LLM cost
+                  │  email-decision.py classifies intent
+                  ▼
+           ┌──────────────┐
+           │ continue? ──── claude --resume (same session, full context)
+           │ new?      ──── claude -p      (fresh session)
+           └──────────────┘
+                  │
+             SMTP reply
 ```
 
-Or use CronCreate with:
+## File Structure
+
 ```
-*/13 * * * *
-prompt: check /tmp/email-pending-queue.txt — if empty reply ".",
-if has content, process instructions, email results via
-email-bridge.py send, then truncate the queue.
+email-bridge/
+├── email-bridge.py              # Send/check emails
+├── email-poll-loop.sh           # Background poller with smart routing
+├── email-decision.py            # Keyword classifier (continue vs new)
+├── SKILL.md                     # This file
+├── email-config.example.json    # Config template
+├── .gitignore
+├── LICENSE
+└── README.md
 ```
-
-## When Claude Code Uses Email
-
-**Send notifications** — long-running tasks (>2 min), or when user says "notify me when done".
-
-**Check inbox** — automatic via the background poller + cron setup above.
-
-## Email Command Protocol
-
-1. Background poller detects new email → writes to queue
-2. Cron fires → Claude reads queue file
-3. Execute the email body as a command
-4. Reply via email with results
-5. Clear the queue file
 
 ## Supported Providers
 
@@ -96,19 +87,6 @@ email-bridge.py send, then truncate the queue.
 | 163.com  | smtp.163.com:465 | pop.163.com:995 |
 | QQ Mail  | smtp.qq.com:465 | pop.qq.com:995 |
 | Gmail    | smtp.gmail.com:465 | pop.gmail.com:995 |
-
-## File Structure
-
-```
-email-bridge/
-├── email-bridge.py              # Send/check emails
-├── email-poll-loop.sh           # Background silent poller
-├── SKILL.md                     # This file
-├── email-config.example.json    # Config template
-├── .gitignore
-├── LICENSE
-└── README.md
-```
 
 ## Security
 
