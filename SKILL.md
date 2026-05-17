@@ -1,3 +1,8 @@
+---
+name: email-bridge
+description: Communicate with Claude Code via email. Send task results, receive and execute instructions from email via SMTP/POP3. Supports 163.com, QQ Mail, Gmail. Ideal for long-running tasks and remote control.
+---
+
 # Email Bridge Skill
 
 Communicate with Claude Code via email — send task results, receive and execute instructions from email.
